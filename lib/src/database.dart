@@ -77,9 +77,11 @@ class Db {
       bool absolutePath = false,
       List<String> queries = const <String>[],
       List<DbTable> schema = const <DbTable>[],
+      List<List<DbTable>> migrationSchemes = const <List<DbTable>>[],
       bool verbose = false,
       String fromAsset,
-      bool debug = false}) async {
+      bool debug = false,
+      int version = 1}) async {
     /// The [path] is where the database file will be stored. It is by
     /// default relative to the documents directory unless [absolutePath]
     /// is true.
@@ -128,29 +130,30 @@ class Db {
       await _mutex.synchronized(() async {
         // open
         if (verbose) print("OPENING database");
-        this._db = await openDatabase(dbpath, version: 1,
-            onCreate: (Database _db, int version) async {
-          if (schema != null) {
-            final schemaQueries = <String>[];
-            schema.forEach(
-                (tableSchema) => schemaQueries.addAll(tableSchema.queries));
-            schemaQueries.addAll(queries);
-            queries = schemaQueries;
+        this._db = await openDatabase(
+          dbpath, version: version,
+          onCreate: (Database db, int version) async {
+            if (schema != null) {
+              final schemaQueries = <String>[];
+              schema.forEach(
+                  (tableSchema) => schemaQueries.addAll(tableSchema.queries));
+              schemaQueries.addAll(queries);
+              queries = schemaQueries;
+            }
+            await executeQueries(queries, db, verbose);
+          },
+          onUpgrade: (Database db, int oldVersion, int newVersion) async {
+            for (var i = oldVersion - 1; i < newVersion - 1; i++) {
+              var schema = migrationSchemes[i];
+              final schemaQueries = <String>[];
+              schema.forEach(
+                      (tableSchema) => schemaQueries.addAll(tableSchema.queries));
+              schemaQueries.addAll(queries);
+              queries = schemaQueries;
+            }
+            await executeQueries(queries, db, verbose);
           }
-          if (queries.isNotEmpty) {
-            await _db.transaction((txn) async {
-              for (final String q in queries) {
-                final Stopwatch timer = Stopwatch()..start();
-                await txn.execute(q);
-                timer.stop();
-                if (verbose) {
-                  final String msg = "$q in ${timer.elapsedMilliseconds} ms";
-                  print(msg);
-                }
-              }
-            });
-          }
-        });
+         );
       });
     }
     if (schema != null)
@@ -160,6 +163,22 @@ class Db {
     _dbFile = File(dbpath);
     if (!_readyCompleter.isCompleted) _readyCompleter.complete();
     _isReady = true;
+  }
+
+  Future<void> executeQueries(List<String> queries, Database db, bool verbose) async {
+    if (queries.isNotEmpty) {
+      await db.transaction((txn) async {
+        for (final String q in queries) {
+          final Stopwatch timer = Stopwatch()..start();
+          await txn.execute(q);
+          timer.stop();
+          if (verbose) {
+            final String msg = "$q in ${timer.elapsedMilliseconds} ms";
+            print(msg);
+          }
+        }
+      });
+    }
   }
 
   /// Execute a query
