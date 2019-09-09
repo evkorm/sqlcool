@@ -35,7 +35,8 @@ Future<void> initDb() async {
   await db
       .init(
           path: dbpath,
-          schema: [category, product],
+          version: 1,
+          migrationSchemes: {1: [category.queries, product.queries]},
           queries: populateQueries,
           verbose: true)
       .catchError((dynamic e) {
